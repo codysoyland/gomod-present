@@ -1,0 +1,250 @@
+Go Modules and Dependency Management
+Presented at Austin Go Language User Group
+19:00 15 May 2019
+Tags: go, modules, vgo, dep
+
+Cody Soyland
+Lead Software Engineer, Molecula
+cody@soyland.com
+https://www.pilosa.com/
+@codysoyland
+
+* History
+
+Go has always made it easy to know where your dependencies come from:
+
+    import "github.com/pkg/errors"
+
+Because the clone url is part of the package name, you always know which package the author was referring to.
+
+* 
+
+But what happens when new versions of your dependencies are released?
+
+Or if the repo disappeared (see left-pad)?
+
+Or if the domain hosting that package was hacked?
+
+Or if the API is no longer compatible with your application?
+
+* 
+
+As developers, we need to be able to trust that our code continues to work as intended after it is released.
+
+In order to do that, we must be able to control the versions of the dependency code our application (or library) relies on, and that process is *dependency*management*, which gives you several advantages:
+
+- Repeatable builds
+- Version selection
+- Security guarantees
+- Compatibility guarantees
+
+* Dependency Management
+
+For years, Go developers had to rely on managing their own dependencies. Several approaches to this included:
+
+- `go get` to install/upgrade packages manually as needed.
+- Per-project GOPATH directories, committing GOPATH to repo (vendoring)
+- Third-party tools (goven, godep, gb, glide, dep)
+
+* 2015
+
+In July 2015, Russ Cox proposed the "Go 1.5 Vendor Experiment":
+"If there is a source directory d/vendor, then, when compiling a source file within the subtree rooted at d, import "p" is interpreted as import "d/vendor/p" if that path names a directory containing at least one file with a name ending in “.go”."
+.link https://go.googlesource.com/proposal/+/master/design/25719-go15vendor.md
+
+In August 2015, Go 1.5 was released with experimental vendor support enabled with a flag.
+
+In August 2015, Dave Cheney proposed a release process for Go projects and heavily promoted Semantic Versioning:
+.link https://github.com/golang/go/issues/12302
+
+* 2016
+
+In February 2016, Go 1.6 was released with vendor support enabled by default.
+
+In February 2016, Sam Boyer announced plans to build Dep:
+.link https://medium.com/@sdboyer/so-you-want-to-write-a-package-manager-4ae9c17d9527
+
+Dep was the first dependency manager for Go to be considered an official experiment. 
+
+* 2017
+
+In January 2017, Dep was released. By summer, it was considered production ready (at least by my team).
+
+Dep quickly gained mass adoption in the Go community.
+
+* 2018
+
+In February 2018, Russ Cox released a series of blog posts describing `vgo`, an experimental dependency manager and Go command wrapper.
+
+In May 2018, `vgo` was formally proposed and accepted for inclusion in Go 1.11.
+
+In August 2018, Go 1.11 was released with experimental module support (by default enabled only outside GOPATH), renamed from `vgo`.
+
+* Why didn't Dep win?
+
+Dep was a successful experiment for helping the Go team understand the problem space better.
+
+But Dep failed in a few ways:
+
+- Inability to run multiple major versions of a single dependency
+- Version constraints were too flexible
+- Resolution algorithm was complex and slow (SAT resolver)
+- Interface design and Go command integration was not well thought out
+
+* Why Go Modules?
+
+There was a heated public disagreement over the direction of the two projects, `dep` and `vgo`.
+
+The most notable differences are:
+
+- Minimal Version Selection
+- Semantic Import Versioning
+- Global versioned module cache
+- Freedom from $GOPATH
+
+* Minimal Version Selection
+
+Traditionally, dependency resolution is a complex problem, also known as the boolean satisfiability problem (SAT), which is NP-complete.
+
+Minimal Version Selection is a simplified algorithm that is much easier to implement, but has fewer features.
+
+Each module only specifies the minimum version needed. In Go modules, it will always select the minimum version, so dependencies will not automatically be upgraded.
+
+If multiple dependencies depend on the same transitive dependency, the latest version requested wins.
+
+It is a safe/conservative way of ensuring that package upgrades only happen intentionally.
+
+* Semantic Versioning
+
+Semantic Versioning is a community standard of versioning software, taking the form of:
+
+    |     /-> Major
+    |    / /-> Minor
+    |   / / /-> Patch
+    | vX.Y.Z
+
+- Major releases, such as `v1.0.0`, which indicate backward-incompatible changes, such as API removals and func signature changes
+- Minor releases, such as `v1.5.0`, which indicate new features (non-breaking)
+- Patch releases, such as `v1.5.3`, which indicate bug fixes (non-breaking)
+
+Authors of Go software are now expected to conform to this standard.
+
+Git tags are used to indicate the version.
+
+* Semantic Import Versioning
+
+Because major versions (1.0.0, 2.0.0, etc.) are allowed to break backwards compatibility, it is important for large distributed projects to be able to link multiple major versions into a single build.
+
+Go modules make this possible with *Semantic*Import*Versioning*, which adds an optional version modifier to the Go import syntax, ie `github.com/codysoyland/foobar/v2`.
+
+* Diamond Dependency Problem
+
+.image ./diamond.png
+.image ./diamond-split.png
+
+* Basic design
+
+Go modules define their dependencies by adding two files to the root of your module:
+
+- Module file (go.mod)
+- Lock file (go.sum)
+
+The module file specifies the intended minimum versions required.
+
+The lock file enables _reproducible_builds_ by recording the exact combination of dependencies used in development.
+
+* Getting started
+
+To get started, run the following:
+
+    go mod init
+
+This will generate a `go.mod` by searching your repo for import declarations and downloading the latest release of each dependency.
+
+If you are already using dep, glide, govendor, godep, or several other options, `go`mod`init` will translate your existing configuration to produce an equivalent build.
+
+* go.mod
+
+Example:
+
+.code gomod-a/go.mod
+
+Directives:
+    - `module`: name of module (including Semantic Import Versioning tag)
+    - `require`: dependency statement with minimum version
+    - `replace`: override source of requirement
+    - `exclude`: exclude a specific version from being installed
+
+* go.sum
+
+Example:
+
+.code gomod-a/go.sum
+
+* Integrating into your workflow
+
+Using Go modules is almost transparent, as integration is built into the `go` command.
+
+First set the environment variable:
+
+    export GO111MODULE=on
+
+Then, the following commands become _module_aware_:
+
+    go get
+    go build
+    go install
+    go test
+
+These operate as expected, but instead of modifying GOPATH, they modify `go.mod` and `go.sum`.
+
+* Upgrading dependencies
+
+Upgrading a single dependency is as easy as:
+
+    go get -u import/path/to/module
+
+To specify a version:
+
+    go get import/path/to/module@v1.4.0
+
+To upgrade dependencies to the latest release:
+
+    go get -u
+
+To upgrade dependencies to the latest _patch_ release:
+
+    go get -u=patch
+
+* go mod command
+
+    go mod download    download modules to local cache
+    go mod edit        edit go.mod from tools or scripts
+    go mod graph       print module requirement graph
+    go mod init        initialize new module in current directory
+    go mod tidy        add missing and remove unused modules
+    go mod vendor      make vendored copy of dependencies
+    go mod verify      verify dependencies have expected content
+    go mod why         explain why packages or modules are needed
+
+* Demo time
+
+Hold onto your butts!
+
+To follow along, check out this presentation and example repos:
+
+    git clone https://github.com/codysoyland/gomod-present.git
+    cd gomod-present
+    cat README.md
+    make
+
+* References
+
+.link https://medium.com/@sdboyer/so-you-want-to-write-a-package-manager-4ae9c17d9527
+.link https://research.swtch.com/vgo
+.link https://threadreaderapp.com/thread/1022588240501661696.html
+.link https://threadreaderapp.com/thread/1034893100450291713.html
+.link https://github.com/golang/go/wiki/Modules
+.link https://en.wikipedia.org/wiki/Boolean_satisfiability_problem
+.link https://www.youtube.com/watch?v=F8nrpe0XWRg
+.link https://github.com/codysoyland/gomod-present
